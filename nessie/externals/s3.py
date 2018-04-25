@@ -61,7 +61,7 @@ def get_client():
     )
 
 
-def get_keys_with_prefix(prefix):
+def get_keys_with_prefix(prefix, full_objects=False):
     client = get_client()
     bucket = app.config['LOCH_S3_BUCKET']
     objects = []
@@ -70,7 +70,10 @@ def get_keys_with_prefix(prefix):
     try:
         for page in page_iterator:
             if 'Contents' in page:
-                objects += [object.get('Key') for object in page['Contents']]
+                if full_objects:
+                    objects += page['Contents']
+                else:
+                    objects += [object.get('Key') for object in page['Contents']]
     except (ClientError, ConnectionError, ValueError) as e:
         app.logger.error(f'Error listing S3 keys with prefix: bucket={bucket}, prefix={prefix}, error={e}')
         return None
@@ -88,7 +91,20 @@ def object_exists(key):
         return False
 
 
+def upload_data(data, s3_key):
+    bucket = app.config['LOCH_S3_BUCKET']
+    try:
+        client = get_client()
+        client.put_object(Bucket=bucket, Key=s3_key, Body=data, ServerSideEncryption='AES256')
+    except (ClientError, ConnectionError, ValueError) as e:
+        app.logger.error(f'Error on S3 upload: bucket={bucket}, key={s3_key}, error={e}')
+        return False
+    app.logger.info(f'S3 upload complete: bucket={bucket}, key={s3_key}')
+    return True
+
+
 def upload_from_url(url, s3_key):
+    bucket = app.config['LOCH_S3_BUCKET']
     s3_url = build_s3_url(s3_key)
     with requests.get(url, stream=True) as response:
         if response.status_code != 200:
@@ -102,7 +118,7 @@ def upload_from_url(url, s3_key):
                 for chunk in response.iter_content(chunk_size=1024):
                     s3_out.write(chunk)
         except (ClientError, ConnectionError, ValueError) as e:
-            app.logger.error(f'Error on S3 upload: source_url={url}, s3_url={s3_url}, error={e}')
+            app.logger.error(f'Error on S3 upload: source_url={url}, bucket={bucket}, key={s3_key}, error={e}')
             return False
-    app.logger.info(f'S3 upload complete: source_url={url}, s3_url={s3_url}')
+    app.logger.info(f'S3 upload complete: source_url={url}, bucket={bucket}, key={s3_key}')
     return True
