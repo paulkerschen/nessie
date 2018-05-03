@@ -36,17 +36,21 @@ from nessie.jobs.background_job import BackgroundJob, get_s3_sis_daily_path, res
 class CreateSisSchema(BackgroundJob):
 
     def run(self):
-        app.logger.info(f'Starting SIS schema creation job...')
+        app.logger.info('Starting SIS schema creation job...')
         if not self.update_manifests():
             app.logger.info('Error updating manifests, will not execute schema creation SQL')
-            return
-        app.logger.info(f'Executing SQL...')
+            return False
+        app.logger.info('Executing SQL...')
         resolved_ddl = resolve_sql_template('create_sis_schema.template.sql')
-        redshift.execute_ddl_script(resolved_ddl)
-        app.logger.info(f'SIS schema creation job completed')
+        if redshift.execute_ddl_script(resolved_ddl):
+            app.logger.info('SIS schema creation job completed.')
+            return True
+        else:
+            app.logger.error('SIS schema creation job failed.')
+            return False
 
     def update_manifests(self):
-        app.logger.info(f'Updating manifests...')
+        app.logger.info('Updating manifests...')
         courses_daily = s3.get_keys_with_prefix(get_s3_sis_daily_path() + '/courses', full_objects=True)
         courses_historical = s3.get_keys_with_prefix(app.config['LOCH_S3_SIS_DATA_PATH'] + '/historical/courses', full_objects=True)
         enrollments_daily = s3.get_keys_with_prefix(get_s3_sis_daily_path() + '/enrollments', full_objects=True)

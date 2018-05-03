@@ -35,7 +35,11 @@ from nessie.jobs.background_job import BackgroundJob, resolve_sql_template
 class GenerateBoacAnalytics(BackgroundJob):
 
     def run(self):
-        app.logger.info(f'Starting BOAC analytics job...')
+        app.logger.info('Starting BOAC analytics job...')
         resolved_ddl = resolve_sql_template('create_boac_schema.template.sql')
-        redshift.execute_ddl_script(resolved_ddl)
-        app.logger.info(f'BOAC analytics creation job completed')
+        if redshift.execute_ddl_script(resolved_ddl):
+            app.logger.info('BOAC analytics creation job completed.')
+            return True
+        else:
+            app.logger.error('BOAC analytics creation job failed.')
+            return False
