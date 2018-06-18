@@ -29,9 +29,8 @@ ENHANCEMENTS, OR MODIFICATIONS.
 
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
+from flask import current_app as app
 
-
-app = None
 sched = None
 
 
@@ -47,7 +46,7 @@ def get_scheduler():
     return sched
 
 
-def initialize_job_schedules(_app, force=False):
+def initialize_job_schedules(force=False):
     from nessie.jobs.create_canvas_schema import CreateCanvasSchema
     from nessie.jobs.create_sis_schema import CreateSisSchema
     from nessie.jobs.generate_boac_analytics import GenerateBoacAnalytics
@@ -55,10 +54,8 @@ def initialize_job_schedules(_app, force=False):
     from nessie.jobs.resync_canvas_snapshots import ResyncCanvasSnapshots
     from nessie.jobs.sync_canvas_snapshots import SyncCanvasSnapshots
 
-    global app
-    app = _app
-
     global sched
+
     if app.config['JOB_SCHEDULING_ENABLED']:
         db_jobstore = SQLAlchemyJobStore(url=app.config['SQLALCHEMY_DATABASE_URI'], tablename='apscheduler_jobs')
         sched = BackgroundScheduler(jobstores={'default': db_jobstore})

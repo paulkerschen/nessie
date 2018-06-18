@@ -30,6 +30,8 @@ ENHANCEMENTS, OR MODIFICATIONS.
 from queue import Queue
 from threading import Thread
 
+from flask import current_app as app
+
 
 job_queue = None
 
@@ -38,7 +40,7 @@ def get_job_queue():
     return job_queue
 
 
-def initialize_job_queue(app):
+def initialize_job_queue():
     if app.config['WORKER_QUEUE_ENABLED']:
         global job_queue
         job_queue = Queue()
@@ -48,8 +50,8 @@ def initialize_job_queue(app):
             worker_thread.start()
 
 
-def listen_for_jobs(app, queue):
-    with app.app_context():
+def listen_for_jobs(app_arg, queue):
+    with app_arg.app_context():
         while True:
             job = queue.get()
             args = job.job_args
