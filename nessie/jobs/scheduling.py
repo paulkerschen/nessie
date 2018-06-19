@@ -29,6 +29,7 @@ ENHANCEMENTS, OR MODIFICATIONS.
 
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
+from nessie.models.util import try_advisory_lock
 
 
 app = None
@@ -60,6 +61,12 @@ def initialize_job_schedules(_app, force=False):
 
     global sched
     if app.config['JOB_SCHEDULING_ENABLED']:
+
+        if try_advisory_lock(5000):
+            app.logger.info(f'Granted advisory lock 5000.')
+        else:
+            app.logger.warn(f'Was not granted advisory lock 5000.')
+
         db_jobstore = SQLAlchemyJobStore(url=app.config['SQLALCHEMY_DATABASE_URI'], tablename='apscheduler_jobs')
         sched = BackgroundScheduler(jobstores={'default': db_jobstore})
         sched.start()
