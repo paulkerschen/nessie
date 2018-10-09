@@ -113,6 +113,7 @@ LRS_INCREMENTAL_TRANSIENT_BUCKET = 'transient bucket'
 LRS_INCREMENTAL_TRANSIENT_PATH = 'lrs/transient/path'
 LRS_INCREMENTAL_DESTINATION_BUCKETS = ['bucket', 'list']
 LRS_INCREMENTAL_DESTINATION_PATH = 'lrs/destination/path'
+LRS_INCREMENTAL_ETL_PATH = 'lrs/transient/path'
 
 LOCH_S3_BUCKET = 'bucket_name'
 LOCH_S3_REGION = 'us-west-2'
