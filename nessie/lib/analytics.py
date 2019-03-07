@@ -46,7 +46,7 @@ def merge_assignment_submissions_for_user(user_courses, canvas_user_id, relative
     if user_courses:
         for course in user_courses:
             canvas_course_id = course['canvasCourseId']
-            course['analytics'] = course['analytics'] or {}
+            course['analytics'] = course.get('analytics') or {}
             course['analytics']['assignmentsSubmitted'] = assignments_submitted(canvas_user_id, canvas_course_id, relative_submission_counts)
 
 
@@ -54,7 +54,7 @@ def merge_analytics_except_assignment_submissions_for_user(user_courses, canvas_
     if user_courses:
         for course in user_courses:
             canvas_course_id = course['canvasCourseId']
-            course['analytics'] = course['analytics'] or {}
+            course['analytics'] = course.get('analytics') or {}
             course['analytics'].update(student_analytics(canvas_user_id, canvas_course_id, canvas_site_map))
 
 
@@ -131,6 +131,33 @@ def assignments_submitted(canvas_user_id, canvas_course_id, relative_submission_
         # Fetch newly appended row, mostly for the sake of its properly set-up index.
         student_row = df.loc[df['canvas_user_id'].values == int(canvas_user_id)]
     return analytics_for_column(df, student_row, 'submissions_turned_in')
+
+
+def canvas_site_analytics(advisee_user_ids, canvas_course_id, canvas_site_map):
+    analytics_by_canvas_user_id = {}
+    enrollments = canvas_site_map.get(canvas_course_id, {}).get('enrollments')
+    if enrollments is None:
+        _error = {'error': 'Redshift query returned no results'}
+        return {'currentScore': _error, 'lastActivity': _error}
+    df = pandas.DataFrame(enrollments, columns=['canvas_user_id', 'current_score', 'last_activity_at'])
+    for advisee_user_id in advisee_user_ids:
+        student_row = df.loc[df['canvas_user_id'].values == int(advisee_user_id)]
+        if enrollments and student_row.empty:
+            app.logger.warning(f'Canvas user {advisee_user_id} not found in Data Loch for course site {canvas_course_id}')
+            student_row = pandas.DataFrame({
+                'canvas_user_id': [int(advisee_user_id)],
+                'current_score': [None],
+                'last_activity_at': [None],
+            })
+            df = df.append(student_row, ignore_index=True)
+            # Fetch newly appended row, mostly for the sake of its properly set-up index.
+            student_row = df.loc[df['canvas_user_id'].values == int(advisee_user_id)]
+        analytics_by_canvas_user_id['canvas_user_id'] = {
+            'currentScore': analytics_for_column(df, student_row, 'current_score'),
+            'lastActivity': analytics_for_column(df, student_row, 'last_activity_at'),
+            'courseEnrollmentCount': len(enrollments),
+        }
+    return analytics_by_canvas_user_id
 
 
 def student_analytics(canvas_user_id, canvas_course_id, canvas_site_map):

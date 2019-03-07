@@ -54,7 +54,7 @@ def merge_advisee_assignment_submissions(terms_map, canvas_user_id, relative_sub
             canvas_courses += enrollment['canvasSites']
         canvas_courses += term_feed.get('unmatchedCanvasSites', [])
         # Decorate the Canvas courses list with per-course statistics and return summary statistics.
-        term_feed['analytics'] = term_feed['analytics'] or {}
+        term_feed['analytics'] = term_feed.get('analytics') or {}
         term_feed['analytics']['assignmentSubmissions'] = mean_assignment_submissions_for_user(
             canvas_courses,
             canvas_user_id,
@@ -71,8 +71,8 @@ def merge_advisee_analytics_except_assignment_submissions(terms_map, canvas_user
             canvas_courses += enrollment['canvasSites']
         canvas_courses += term_feed.get('unmatchedCanvasSites', [])
         # Decorate the Canvas courses list with per-course statistics and return summary statistics.
-        term_feed['analytics'] = term_feed['analytics'] or {}
-        term_feed['analytics'].merge(mean_analytics_except_assignment_submissions_for_user(
+        term_feed['analytics'] = term_feed.get('analytics') or {}
+        term_feed['analytics'].update(mean_analytics_except_assignment_submissions_for_user(
             canvas_courses,
             canvas_user_id,
             relative_submission_counts,
@@ -99,13 +99,14 @@ advisee_ids = list(advisee_ids_map.keys())
 
 print(f'Starting non-assignment-submissions analytics merge for {len(advisee_ids)} advisees')
 for canvas_user_id in advisee_ids:
+    user_count += 1
     print(f'Here is Canvas ID {canvas_user_id} (user {user_count}, {time.time() - t} seconds)')
     sid = advisee_ids_map[canvas_user_id].get('sid')
     advisee_terms_map = all_advisees_terms_map.get(sid)
     if not advisee_terms_map:
         # Nothing to merge.
         continue
-    merge_advisee_analytics(advisee_terms_map, canvas_user_id, {}, canvas_site_map)
+    merge_advisee_analytics_except_assignment_submissions(advisee_terms_map, canvas_user_id, {}, canvas_site_map)
 
 t = time.time()
 user_count = 0
