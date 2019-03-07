@@ -24,7 +24,6 @@ ENHANCEMENTS, OR MODIFICATIONS.
 """
 
 import math
-from statistics import mean
 
 from flask import current_app as app
 from numpy import nan
@@ -40,26 +39,6 @@ def merge_analytics_for_user(user_courses, canvas_user_id, relative_submission_c
                 'assignmentsSubmitted': assignments_submitted(canvas_user_id, canvas_course_id, relative_submission_counts),
             }
             course['analytics'].update(student_analytics(canvas_user_id, canvas_course_id, canvas_site_map))
-
-
-def mean_course_analytics_for_user(user_courses, canvas_user_id, relative_submission_counts, canvas_site_map):
-    merge_analytics_for_user(user_courses, canvas_user_id, relative_submission_counts, canvas_site_map)
-    mean_values = {}
-    for metric in ['assignmentsSubmitted', 'currentScore', 'lastActivity']:
-        percentiles = []
-        for course in user_courses:
-            percentile = course['analytics'].get(metric, {}).get('student', {}).get('percentile')
-            if percentile and not math.isnan(percentile):
-                percentiles.append(percentile)
-        if len(percentiles):
-            mean_percentile = mean(percentiles)
-            mean_values[metric] = {
-                'displayPercentile': ordinal(mean_percentile),
-                'percentile': mean_percentile,
-            }
-        else:
-            mean_values[metric] = None
-    return mean_values
 
 
 def _get_canvas_sites_dict(student):

@@ -28,7 +28,7 @@ import operator
 
 from flask import current_app as app
 from nessie.lib import berkeley, queries
-from nessie.lib.analytics import mean_course_analytics_for_user
+from nessie.lib.analytics import merge_analytics_for_user
 
 
 def generate_enrollment_terms_map(advisee_ids_map):
@@ -260,8 +260,8 @@ def merge_advisee_analytics(terms_map, canvas_user_id, relative_submission_count
         for enrollment in term_feed.get('enrollments', []):
             canvas_courses += enrollment['canvasSites']
         canvas_courses += term_feed.get('unmatchedCanvasSites', [])
-        # Decorate the Canvas courses list with per-course statistics and return summary statistics.
-        term_feed['analytics'] = mean_course_analytics_for_user(
+        # Decorate the Canvas courses list with per-course statistics.
+        merge_analytics_for_user(
             canvas_courses,
             canvas_user_id,
             relative_submission_counts,
