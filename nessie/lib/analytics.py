@@ -42,10 +42,63 @@ def merge_analytics_for_user(user_courses, canvas_user_id, relative_submission_c
             course['analytics'].update(student_analytics(canvas_user_id, canvas_course_id, canvas_site_map))
 
 
+def merge_assignment_submissions_for_user(user_courses, canvas_user_id, relative_submission_counts, canvas_site_map):
+    if user_courses:
+        for course in user_courses:
+            canvas_course_id = course['canvasCourseId']
+            course['analytics'] = course['analytics'] or {}
+            course['analytics']['assignmentsSubmitted'] = assignments_submitted(canvas_user_id, canvas_course_id, relative_submission_counts)
+
+
+def merge_analytics_except_assignment_submissions_for_user(user_courses, canvas_user_id, relative_submission_counts, canvas_site_map):
+    if user_courses:
+        for course in user_courses:
+            canvas_course_id = course['canvasCourseId']
+            course['analytics'] = course['analytics'] or {}
+            course['analytics'].update(student_analytics(canvas_user_id, canvas_course_id, canvas_site_map))
+
+
 def mean_course_analytics_for_user(user_courses, canvas_user_id, relative_submission_counts, canvas_site_map):
     merge_analytics_for_user(user_courses, canvas_user_id, relative_submission_counts, canvas_site_map)
     mean_values = {}
     for metric in ['assignmentsSubmitted', 'currentScore', 'lastActivity']:
+        percentiles = []
+        for course in user_courses:
+            percentile = course['analytics'].get(metric, {}).get('student', {}).get('percentile')
+            if percentile and not math.isnan(percentile):
+                percentiles.append(percentile)
+        if len(percentiles):
+            mean_percentile = mean(percentiles)
+            mean_values[metric] = {
+                'displayPercentile': ordinal(mean_percentile),
+                'percentile': mean_percentile,
+            }
+        else:
+            mean_values[metric] = None
+    return mean_values
+
+
+def mean_assignment_submissions_for_user(user_courses, canvas_user_id, relative_submission_counts, canvas_site_map):
+    merge_assignment_submissions_for_user(user_courses, canvas_user_id, relative_submission_counts, canvas_site_map)
+    percentiles = []
+    for course in user_courses:
+        percentile = course['analytics'].get('assignmentsSubmitted', {}).get('student', {}).get('percentile')
+        if percentile and not math.isnan(percentile):
+            percentiles.append(percentile)
+    if len(percentiles):
+        mean_percentile = mean(percentiles)
+        return {
+            'displayPercentile': ordinal(mean_percentile),
+            'percentile': mean_percentile,
+        }
+    else:
+        return None
+
+
+def mean_analytics_except_assignment_submissions_for_user(user_courses, canvas_user_id, relative_submission_counts, canvas_site_map):
+    merge_analytics_except_assignment_submissions_for_user(user_courses, canvas_user_id, relative_submission_counts, canvas_site_map)
+    mean_values = {}
+    for metric in ['currentScore', 'lastActivity']:
         percentiles = []
         for course in user_courses:
             percentile = course['analytics'].get(metric, {}).get('student', {}).get('percentile')
