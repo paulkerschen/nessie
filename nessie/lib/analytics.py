@@ -24,7 +24,6 @@ ENHANCEMENTS, OR MODIFICATIONS.
 """
 
 import math
-from statistics import mean
 
 from flask import current_app as app
 from numpy import nan
@@ -40,10 +39,11 @@ def merge_analytics_for_course(canvas_site_element):
     advisee_enrollments = canvas_site_element.get('adviseeEnrollments')
     if not advisee_enrollments:
         return None
-    df = pandas.DataFrame(enrollments, columns=['canvas_user_id', 'current_score', 'last_activity_at'])
 
-    course_current_score_analytics = analytics_for_course(df, 'current_score')
-    course_last_activity_analytics = analytics_for_student(df, 'last_activity_at')
+    canvas_course_id = canvas_site_element.get('canvasCourseId')
+    df = pandas.DataFrame(enrollments, columns=['canvas_user_id', 'current_score', 'last_activity_at'])
+    student_rows = {}
+
     for (advisee_user_id, advisee_enrollment) in advisee_enrollments.items():
         student_row = df.loc[df['canvas_user_id'].values == int(advisee_user_id)]
         if enrollments and student_row.empty:
@@ -56,26 +56,34 @@ def merge_analytics_for_course(canvas_site_element):
             df = df.append(student_row, ignore_index=True)
             # Fetch newly appended row, mostly for the sake of its properly set-up index.
             student_row = df.loc[df['canvas_user_id'].values == int(advisee_user_id)]
+        student_rows[advisee_user_id] = student_row
 
+    course_data_slices = fillet_course_analytics(df, ['current_score', 'last_activity_at'])
+    course_current_score_analytics = analytics_for_course(course_data_slices['current_score'])
+    course_last_activity_analytics = analytics_for_course(course_data_slices['last_activity_at'])
+
+    for (advisee_user_id, student_row) in student_rows.items():
         if 'student' not in course_current_score_analytics:
-            student_current_score_analytics = analytics_for_column(df, student_row, 'current_score').update(course_current_score_analytics)
+            student_current_score_analytics = analytics_for_student(course_data_slices['current_score'], student_row, 'current_score')
+            student_current_score_analytics.update(course_current_score_analytics)
         else:
             student_current_score_analytics = course_current_score_analytics
 
         if 'student' not in course_last_activity_analytics:
-            student_last_activity_analytics = analytics_for_column(df, student_row, 'last_activity_at').update(course_current_score_analytics)
+            student_last_activity_analytics = analytics_for_student(course_data_slices['last_activity_at'], student_row, 'last_activity_at')
+            student_last_activity_analytics.update(course_last_activity_analytics)
         else:
             student_last_activity_analytics = course_last_activity_analytics
 
-        advisee_enrollment['analytics'] = advisee_enrollment.get('analytics') or {}
-        advisee_enrollment['analytics'].update({
+        advisee_enrollments[advisee_user_id]['analytics'] = advisee_enrollments[advisee_user_id].get('analytics') or {}
+        advisee_enrollments[advisee_user_id]['analytics'].update({
             'currentScore': student_current_score_analytics,
             'lastActivity': student_last_activity_analytics,
             'courseEnrollmentCount': len(enrollments),
         })
 
 
-def merge_assignment_submissions_for_user(user_courses, canvas_user_id, relative_submission_counts, canvas_site_map):
+def merge_assignment_submissions_for_user(user_courses, canvas_user_id, relative_submission_counts):
     if not user_courses:
         return
     for course in user_courses:
@@ -86,28 +94,44 @@ def merge_assignment_submissions_for_user(user_courses, canvas_user_id, relative
         student_row = df.loc[df['canvas_user_id'].values == int(canvas_user_id)]
 
         if course_rows and student_row.empty:
-            app.logger.warn(f'Canvas user id {canvas_user_id} not found in Data Loch assignments for course site {canvas_course_id}; will assume 0 score')
+            app.logger.warn(f'Canvas user id {canvas_user_id}, course id {canvas_course_id} not found in Data Loch assignments; will assume 0 score')
             student_row = pandas.DataFrame({'canvas_user_id': [int(canvas_user_id)], 'submissions_turned_in': [0]})
             df = df.append(student_row, ignore_index=True)
             # Fetch newly appended row, mostly for the sake of its properly set-up index.
             student_row = df.loc[df['canvas_user_id'].values == int(canvas_user_id)]
 
-        course['analytics']['assignmentsSubmitted'] = analytics_for_course(df, 'submissions_turned_in')
-        if 'student' not in course['analytics']['assignmentsSubmitted']:
-              course['analytics']['assignmentsSubmitted'].update(analytics_for_student(df, student_row, 'submissions_turned_in'))
+    course_data_slices = fillet_course_analytics(df, ['submissions_turned_in'])
+    course['analytics']['assignmentsSubmitted'] = analytics_for_course(course_data_slices['submissions_turned_in'])
+    if 'student' not in course['analytics']['assignmentsSubmitted']:
+        course['analytics']['assignmentsSubmitted'].update(analytics_for_student(course_data_slices['submissions_turned_in'], student_row, 'submissions_turned_in'))
 
 
-def analytics_for_course(df, column_name):
-    dfcol = df[column_name]
+def fillet_course_analytics(df, metrics):
+    course_data_slices = {}
+    for metric in metrics:
+        course_data_slices[metric] = {}
+        course_data_slices[metric]['dfcol'] = df[metric]
+        # If no data exists for a column, the Pandas 'nunique' function reports zero unique values.
+        # However, some feeds (such as Canvas student summaries) return (mostly) zero values rather than empty lists,
+        # and we've also seen some Canvas feeds which mix nulls and zeroes.
+        # Setting non-numbers to zero works acceptably for most current analyzed feeds, apart from lastActivity (see below).
+        course_data_slices[metric]['dfcol'].fillna(0, inplace=True)
+        course_data_slices[metric]['unique_scores'] = course_data_slices[metric]['dfcol'].unique().tolist()
+        course_data_slices[metric]['original_values'] = course_data_slices[metric]['dfcol'].tolist()
 
-    # If no data exists for a column, the Pandas 'nunique' function reports zero unique values.
-    # However, some feeds (such as Canvas student summaries) return (mostly) zero values rather than empty lists,
-    # and we've also seen some Canvas feeds which mix nulls and zeroes.
-    # Setting non-numbers to zero works acceptably for most current analyzed feeds, apart from lastActivity (see below).
-    dfcol.fillna(0, inplace=True)
+        # When calculating z-scores and means for lastActivity, zeroed-out "no activity" values must be dropped, since zeros
+        # and Unix timestamps don't play well in the same distribution. However, the mean's intuitive-percentile
+        # must match that of any real student who happens to have the same raw value as the mean.
+        if metric == 'last_activity_at':
+            course_data_slices[metric]['dfcol_normalized'] = course_data_slices[metric]['dfcol'].replace(0, nan).dropna()
+        else:
+            course_data_slices[metric]['dfcol_normalized'] = course_data_slices[metric]['dfcol']
+    return course_data_slices
 
-    nunique = dfcol.nunique()
-    if nunique == 0 or (nunique == 1 and dfcol.max() == 0.0):
+
+def analytics_for_course(sliver):
+    nunique = sliver['dfcol'].nunique()
+    if nunique == 0 or (nunique == 1 and sliver['dfcol'].max() == 0.0):
         return {
             'boxPlottable': False,
             'student': {
@@ -120,20 +144,19 @@ def analytics_for_course(df, column_name):
             'displayPercentile': None,
         }
 
-    original_values = dfcol.tolist()
-    unique_scores = dfcol.unique().tolist()
-
     # If only ten or fewer values are shared across the student population, the 'universal' percentile figure and the
     # box-and-whisker graph will usually look odd. With such sparse data sets, a text summary and an (optional)
     # histogram are more readable.
     box_plottable = (nunique > 10)
-    column_quantiles = quantiles(dfcol, 10)
-    course_mean = dfcol.mean()
+
+    column_quantiles = quantiles(sliver['dfcol'], 10)
+
+    course_mean = sliver['dfcol_normalized'].mean()
     if course_mean and not math.isnan(course_mean):
         # Spoiler: this will be '50.0'.
-        comparative_percentile_of_mean = zptile(zscore(dfcol, course_mean))
-        intuitive_percentile_of_mean = int(percentileofscore(original_values, course_mean, kind='weak'))
-        matrixy_comparative_percentile_of_mean = percentileofscore(unique_scores, course_mean, kind='strict')
+        comparative_percentile_of_mean = zptile(zscore(sliver['dfcol_normalized'], course_mean))
+        intuitive_percentile_of_mean = int(percentileofscore(sliver['original_values'], course_mean, kind='weak'))
+        matrixy_comparative_percentile_of_mean = percentileofscore(sliver['unique_scores'], course_mean, kind='strict')
     else:
         comparative_percentile_of_mean = None
         matrixy_comparative_percentile_of_mean = None
@@ -147,15 +170,13 @@ def analytics_for_course(df, column_name):
             'percentile': comparative_percentile_of_mean,
             'raw': course_mean,
             'roundedUpPercentile': intuitive_percentile_of_mean,
-        }
-    }, unique_scores
+        },
+    }
 
 
-def analytics_for_student(df, student_row, column_name, unique_scores):
-    dfcol = df[column_name]
-
+def analytics_for_student(sliver, student_row, column_name):
     student_row = student_row.fillna(0)
-    intuitive_percentile = rounded_up_percentile(dfcol, student_row)
+    intuitive_percentile = rounded_up_percentile(sliver['dfcol'], student_row)
     # The intuitive percentile is our best option for display, whether or not the distribution is boxplottable.
     # Note, however, that if all students have the same score, then all students are in the "100th percentile."
     display_percentile = ordinal(intuitive_percentile)
@@ -163,16 +184,10 @@ def analytics_for_student(df, student_row, column_name, unique_scores):
     column_value = student_row[column_name].values[0]
     raw_value = round(column_value.item())
 
-    # When calculating z-scores and means for lastActivity, zeroed-out "no activity" values must be dropped, since zeros
-    # and Unix timestamps don't play well in the same distribution. However, the mean's intuitive-percentile
-    # must match that of any real student who happens to have the same raw value as the mean.
-    if column_name == 'last_activity_at':
-        dfcol = dfcol.replace(0, nan).dropna()
-
-    column_zscore = zscore(dfcol, column_value)
+    column_zscore = zscore(sliver['dfcol_normalized'], column_value)
     comparative_percentile = zptile(column_zscore)
     # For purposes of matrix plotting, improve visual spread by calculating percentile against a range of unique scores.
-    matrixy_comparative_percentile = percentileofscore(unique_scores, column_value, kind='strict')
+    matrixy_comparative_percentile = percentileofscore(sliver['unique_scores'], column_value, kind='strict')
 
     return {
         'student': {
@@ -181,7 +196,6 @@ def analytics_for_student(df, student_row, column_name, unique_scores):
             'raw': raw_value,
             'roundedUpPercentile': intuitive_percentile,
         },
-
         'displayPercentile': display_percentile,
     }
 

@@ -28,7 +28,7 @@ import operator
 
 from flask import current_app as app
 from nessie.lib import berkeley, queries
-from nessie.lib.analytics import merge_analytics_except_assignment_submissions_for_course, merge_assignment_submissions_for_user
+from nessie.lib.analytics import merge_analytics_for_course, merge_assignment_submissions_for_user
 
 
 def generate_enrollment_terms_map(advisees_by_canvas_id, advisees_by_sid):
@@ -112,7 +112,7 @@ def get_canvas_site_map():
             'courseTerm': canvas_course_term,
             'enrollments': [],
             'sis_sections': sis_sections,
-            'adviseeEnrollments': {}
+            'adviseeEnrollments': {},
         }
         sis_term_id = berkeley.sis_term_id_for_name(canvas_course_term)
         sids = row.get('advisee_sids', [])
@@ -187,20 +187,23 @@ def merge_canvas_data(canvas_site_map, advisee_site_map, all_advisees_terms_map,
 
 
 def merge_all_analytics_data(advisees_by_canvas_id, canvas_site_map, all_advisees_terms_map):
-    advisee_ids = list(advisee_ids_map.keys())
+    advisee_ids = list(advisees_by_canvas_id.keys())
 
     app.logger.info(f'Starting non-assignment-submissions analytics merge for {len(advisee_ids)} advisees')
+    course_count = 0
     for (canvas_course_id, canvas_site_element) in canvas_site_map.items():
         course_count += 1
-        app.logger.info(f'Here is Canvas course {canvas_course_id} (course {course_count}, {time.time() - t} seconds)')
+        app.logger.info(f'Here is Canvas course {canvas_course_id} (course {course_count})')
         merge_analytics_for_course(canvas_site_element)
 
-    all_counts_query = queries.get_assignment_submissions_sorted()
+    all_counts_query = queries.get_advisee_submissions_sorted()
 
     app.logger.info(f'Starting assignment-submissions analytics merge for advisees with assignment stats')
+    user_count = 0
+    merged_analytics = {}
     for canvas_user_id, sites_grp in groupby(all_counts_query, key=operator.itemgetter('reference_user_id')):
         user_count += 1
-        app.logger.info(f'Here is Canvas ID {canvas_user_id} (user {user_count}, {time.time() - t} seconds)')
+        app.logger.info(f'Here is Canvas ID {canvas_user_id} (user {user_count})')
         if merged_analytics.get(canvas_user_id):
             # We must have already handled calculations for this user on a download that subsequently errored out.
             continue
@@ -217,7 +220,7 @@ def merge_all_analytics_data(advisees_by_canvas_id, canvas_site_map, all_advisee
         relative_submission_counts = {}
         for canvas_course_id, subs_grp in groupby(sites_grp, key=operator.itemgetter('canvas_course_id')):
             relative_submission_counts[canvas_course_id] = list(subs_grp)
-        merge_advisee_assignment_submissions(advisee_terms_map, canvas_user_id, relative_submission_counts, canvas_site_map)
+        merge_advisee_assignment_submissions(advisee_terms_map, canvas_user_id, relative_submission_counts)
         merged_analytics[canvas_user_id] = 'merged'
 
     return all_advisees_terms_map
