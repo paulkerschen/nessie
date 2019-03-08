@@ -9,6 +9,7 @@ from nessie.lib.queries import get_advisee_student_profile_feeds
 t = time.time()
 print('Generating advisee IDs map')
 advisee_ids_map = {}
+advisee_ids_reverse_map = {}
 all_student_feeds = get_advisee_student_profile_feeds()
 for index, student_feed in enumerate(all_student_feeds):
     sid = student_feed.get('sid')
@@ -16,6 +17,7 @@ for index, student_feed in enumerate(all_student_feeds):
     uid = student_feed.get('ldap_uid')
     if canvas_user_id and uid:
         advisee_ids_map[canvas_user_id] = {'sid': sid, 'uid': uid}
+        advisee_ids_reverse_map[sid] = {'canvas_user_id': canvas_user_id}
 print(f'{time.time() - t} seconds')
 
 from nessie.merged.student_terms import get_sis_enrollments, merge_dropped_classes, merge_term_gpas
@@ -35,14 +37,13 @@ print('Getting Canvas site map')
 print('Merging memberships into site map')
 merge_memberships_into_site_map(canvas_site_map)
 print('Merging Canvas data')
-merge_canvas_data(canvas_site_map, advisee_site_map, all_advisees_terms_map)
+merge_canvas_data(canvas_site_map, advisee_site_map, all_advisees_terms_map, advisee_ids_reverse_map)
 print(f'{time.time() - t} seconds')
-
 
 from itertools import groupby
 import operator
 
-from nessie.lib.analytics import mean_assignment_submissions_for_user, mean_analytics_except_assignment_submissions_for_user
+from nessie.lib.analytics import merge_assignment_submissions_for_user, merge_analytics_except_assignment_submissions_for_course
 
 
 print('---MERGING ANALYTICS DATA---')
@@ -55,7 +56,7 @@ def merge_advisee_assignment_submissions(terms_map, canvas_user_id, relative_sub
         canvas_courses += term_feed.get('unmatchedCanvasSites', [])
         # Decorate the Canvas courses list with per-course statistics and return summary statistics.
         term_feed['analytics'] = term_feed.get('analytics') or {}
-        term_feed['analytics']['assignmentSubmissions'] = mean_assignment_submissions_for_user(
+        merge_assignment_submissions_for_user(
             canvas_courses,
             canvas_user_id,
             relative_submission_counts,
@@ -63,22 +64,6 @@ def merge_advisee_assignment_submissions(terms_map, canvas_user_id, relative_sub
         )
     return terms_map
 
-
-def merge_advisee_analytics_except_assignment_submissions(terms_map, canvas_user_id, relative_submission_counts, canvas_site_map):
-    for (term_id, term_feed) in terms_map.items():
-        canvas_courses = []
-        for enrollment in term_feed.get('enrollments', []):
-            canvas_courses += enrollment['canvasSites']
-        canvas_courses += term_feed.get('unmatchedCanvasSites', [])
-        # Decorate the Canvas courses list with per-course statistics and return summary statistics.
-        term_feed['analytics'] = term_feed.get('analytics') or {}
-        term_feed['analytics'].update(mean_analytics_except_assignment_submissions_for_user(
-            canvas_courses,
-            canvas_user_id,
-            relative_submission_counts,
-            canvas_site_map,
-        ))
-    return terms_map
 
 # First, handle those advisees who are graced with billions and billions of assignment submission stats.
 # Track analytics already merged in the event a retry is needed on the submission stats query.
@@ -93,20 +78,15 @@ def submissions_generator():
 all_counts_query = submissions_generator()
 
 t = time.time()
-user_count = 0
+course_count = 0
 
 advisee_ids = list(advisee_ids_map.keys())
 
 print(f'Starting non-assignment-submissions analytics merge for {len(advisee_ids)} advisees')
-for canvas_user_id in advisee_ids:
-    user_count += 1
-    print(f'Here is Canvas ID {canvas_user_id} (user {user_count}, {time.time() - t} seconds)')
-    sid = advisee_ids_map[canvas_user_id].get('sid')
-    advisee_terms_map = all_advisees_terms_map.get(sid)
-    if not advisee_terms_map:
-        # Nothing to merge.
-        continue
-    merge_advisee_analytics_except_assignment_submissions(advisee_terms_map, canvas_user_id, {}, canvas_site_map)
+for (canvas_course_id, canvas_site_element) in canvas_site_map.items():
+    course_count += 1
+    print(f'Here is Canvas course {canvas_course_id} (course {course_count}, {time.time() - t} seconds)')
+    merge_analytics_except_assignment_submissions_for_course(canvas_site_element)
 
 t = time.time()
 user_count = 0
